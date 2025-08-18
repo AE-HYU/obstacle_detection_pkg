@@ -1,0 +1,44 @@
+obstacle_detector:
+  ros__parameters:
+    # ROS topic configuration
+    scan_topic: "/scan_noisy"                      # LaserScan input topic
+    odom_topic: "/ego_racecar/odom"          # Odometry/pose input topic
+    map_topic: "/map"                        # Static map topic
+    
+    # Output topics
+    obstacles_topic: "/detected_obstacles"   # ObstacleArray output
+    updated_map_topic: "/updated_map"        # Updated occupancy grid
+    markers_topic: "/obstacle_markers"       # Visualization markers
+    
+    # DBSCAN clustering parameters
+    dbscan_eps: 0.3              # Maximum distance between points in same cluster (meters)
+    dbscan_min_samples: 5        # Minimum points required to form cluster
+    
+    # Obstacle detection thresholds
+    obstacle_threshold: 0.1      # Minimum distance from map obstacles to consider as new obstacle
+    map_inflation_radius: 0.2    # Inflation radius around map obstacles
+    
+    # LiDAR processing
+    max_lidar_range: 10.0       # Maximum valid range for LiDAR points
+    min_lidar_range: 0.1        # Minimum valid range for LiDAR points
+    
+    # Map updates
+    update_rate: 10.0           # Hz - frequency of obstacle detection updates
+    
+    # Publishing
+    publish_visualization: true  # Publish visualization markers
+    publish_updated_map: true    # Publish updated occupancy grid
+    
+    # Frame IDs
+    global_frame_id: "map"
+    robot_frame_id: "base_link"
+
+map_server:
+  ros__parameters:
+    # Map selection for obstacle detection
+    # Available options:
+    #   - levine: Multi-floor building map with complex geometry
+    #   - Spielberg_map: Race track configuration 
+    #   - basement_fixed: Basement environment
+    #   - map_1753950572: Custom SLAM-generated map from real data
+    map: 'Spielberg_map'           # Selected map file (without .yaml extension)

@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>obstacle_detection_pkg</name>
+  <version>0.0.0</version>
+  <description>DBSCAN-based obstacle detection package for dynamic obstacle identification</description>
+  <maintainer email="journeyofbabo@gmail.com">Jisang Yun</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Core ROS 2 -->
+  <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  
+  <!-- Message types -->
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
+  
+  <!-- Transforms -->
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>tf2_eigen</depend>
+  
+  <!-- Math/Utility libraries -->
+  <depend>eigen3_cmake_module</depend>
+  <depend>eigen</depend>
+  
+  <!-- Map server for occupancy grids -->
+  <build_depend>nav2_map_server</build_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  
+  
+  <!-- For launch files -->
+  <build_depend>launch_ros</build_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- For custom messages -->
+  <build_depend>rosidl_default_generators</build_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
