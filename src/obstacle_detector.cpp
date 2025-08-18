@@ -55,8 +55,12 @@ ObstacleDetector::ObstacleDetector() : Node("obstacle_detector"),
     pose_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
         odom_topic_, 10, std::bind(&ObstacleDetector::poseCallback, this, std::placeholders::_1));
     
+    // Create map subscription with proper QoS for latched topics
+    auto map_qos = rclcpp::QoS(rclcpp::KeepLast(1));
+    map_qos.transient_local();
+    map_qos.reliable();
     map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
-        map_topic_, 10, std::bind(&ObstacleDetector::mapCallback, this, std::placeholders::_1));
+        map_topic_, map_qos, std::bind(&ObstacleDetector::mapCallback, this, std::placeholders::_1));
     
     // Create publishers
     obstacles_pub_ = this->create_publisher<obstacle_detection_pkg::msg::ObstacleArray>(
@@ -99,6 +103,14 @@ void ObstacleDetector::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr
 void ObstacleDetector::processObstacleDetection()
 {
     if (!map_received_ || !pose_received_ || !scan_received_) {
+        static int debug_counter = 0;
+        if (debug_counter % 50 == 0) { // Print every 5 seconds at 10Hz
+            RCLCPP_INFO(this->get_logger(), "Waiting for data - Map: %s, Pose: %s, Scan: %s", 
+                        map_received_ ? "OK" : "MISSING",
+                        pose_received_ ? "OK" : "MISSING", 
+                        scan_received_ ? "OK" : "MISSING");
+        }
+        debug_counter++;
         return;
     }
     

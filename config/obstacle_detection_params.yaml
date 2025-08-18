@@ -3,7 +3,7 @@ obstacle_detector:
     # ROS topic configuration
     scan_topic: "/scan_noisy"                      # LaserScan input topic
     odom_topic: "/ego_racecar/odom"          # Odometry/pose input topic
-    map_topic: "/map"                        # Static map topic
+    map_topic: "/obstacle_map"                # Static map topic from obstacle pkg
     
     # Output topics
     obstacles_topic: "/detected_obstacles"   # ObstacleArray output
