@@ -1,37 +1,68 @@
+/**
+ * @file obstacle_detector.cpp
+ * @brief Implementation of real-time obstacle detection using LiDAR and DBSCAN clustering
+ * 
+ * This implementation provides:
+ * - LiDAR scan processing and coordinate transformation
+ * - Static obstacle filtering using occupancy grid maps
+ * - DBSCAN clustering algorithm for dynamic obstacle detection  
+ * - ROS2 message publishing for detected obstacles and visualization
+ */
+
 #include "obstacle_detection_pkg/obstacle_detector.hpp"
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <algorithm>
 
+/**
+ * @brief Constructor - Initialize obstacle detection node with parameters and ROS2 components
+ * 
+ * Sets up all ROS2 subscribers, publishers, parameters, and starts the main processing timer.
+ * The node waits for map, pose, and scan data before beginning obstacle detection.
+ */
 ObstacleDetector::ObstacleDetector() : Node("obstacle_detector"),
     map_received_(false), pose_received_(false), scan_received_(false)
 {
-    // Declare parameters
+    // =============== Parameter Declaration ===============
+    // ROS2 topic configuration
     this->declare_parameter("scan_topic", "/scan");
     this->declare_parameter("odom_topic", "/odom");
     this->declare_parameter("map_topic", "/map");
     this->declare_parameter("obstacles_topic", "/detected_obstacles");
     this->declare_parameter("updated_map_topic", "/updated_map");
     this->declare_parameter("markers_topic", "/obstacle_markers");
+    
+    // DBSCAN algorithm parameters
     this->declare_parameter("dbscan_eps", 0.3);
     this->declare_parameter("dbscan_min_samples", 5);
+    
+    // Obstacle detection parameters
     this->declare_parameter("obstacle_threshold", 0.1);
     this->declare_parameter("map_inflation_radius", 0.2);
+    
+    // LiDAR processing parameters
     this->declare_parameter("max_lidar_range", 10.0);
     this->declare_parameter("min_lidar_range", 0.1);
+    
+    // Processing and publishing parameters
     this->declare_parameter("update_rate", 10.0);
     this->declare_parameter("publish_visualization", true);
     this->declare_parameter("publish_updated_map", true);
+    
+    // Frame ID parameters
     this->declare_parameter("global_frame_id", "map");
     this->declare_parameter("robot_frame_id", "base_link");
     
-    // Get parameters
+    // =============== Parameter Retrieval ===============
+    // Topic names
     scan_topic_ = this->get_parameter("scan_topic").as_string();
     odom_topic_ = this->get_parameter("odom_topic").as_string();
     map_topic_ = this->get_parameter("map_topic").as_string();
     obstacles_topic_ = this->get_parameter("obstacles_topic").as_string();
     updated_map_topic_ = this->get_parameter("updated_map_topic").as_string();
     markers_topic_ = this->get_parameter("markers_topic").as_string();
+    
+    // Algorithm parameters
     dbscan_eps_ = this->get_parameter("dbscan_eps").as_double();
     dbscan_min_samples_ = this->get_parameter("dbscan_min_samples").as_int();
     obstacle_threshold_ = this->get_parameter("obstacle_threshold").as_double();
@@ -39,59 +70,88 @@ ObstacleDetector::ObstacleDetector() : Node("obstacle_detector"),
     max_lidar_range_ = this->get_parameter("max_lidar_range").as_double();
     min_lidar_range_ = this->get_parameter("min_lidar_range").as_double();
     update_rate_ = this->get_parameter("update_rate").as_double();
+    
+    // Publishing options
     publish_visualization_ = this->get_parameter("publish_visualization").as_bool();
     publish_updated_map_ = this->get_parameter("publish_updated_map").as_bool();
+    
+    // Frame IDs
     global_frame_id_ = this->get_parameter("global_frame_id").as_string();
     robot_frame_id_ = this->get_parameter("robot_frame_id").as_string();
     
-    // Initialize TF2
+    // =============== Transform System Initialization ===============
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
     
-    // Create subscribers
+    // =============== ROS2 Subscribers Setup ===============
+    // LiDAR scan subscriber
     laser_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
         scan_topic_, 10, std::bind(&ObstacleDetector::laserScanCallback, this, std::placeholders::_1));
     
+    // Robot pose/odometry subscriber
     pose_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
         odom_topic_, 10, std::bind(&ObstacleDetector::poseCallback, this, std::placeholders::_1));
     
-    // Create map subscription with proper QoS for latched topics
+    // Static map subscriber with proper QoS for latched topics
     auto map_qos = rclcpp::QoS(rclcpp::KeepLast(1));
-    map_qos.transient_local();
-    map_qos.reliable();
+    map_qos.transient_local();  // Receive messages published before subscription
+    map_qos.reliable();         // Ensure reliable delivery
     map_sub_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
         map_topic_, map_qos, std::bind(&ObstacleDetector::mapCallback, this, std::placeholders::_1));
     
-    // Create publishers
+    // =============== ROS2 Publishers Setup ===============
+    // Detected obstacles publisher
     obstacles_pub_ = this->create_publisher<obstacle_detection_pkg::msg::ObstacleArray>(
         obstacles_topic_, 10);
     
+    // Updated occupancy grid publisher
     updated_map_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
         updated_map_topic_, 10);
     
+    // Visualization markers publisher for RViz
     visualization_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         markers_topic_, 10);
     
-    // Create timer for processing
+    // =============== Processing Timer Setup ===============
     auto timer_period = std::chrono::milliseconds(static_cast<int>(1000.0 / update_rate_));
     timer_ = this->create_wall_timer(timer_period, 
         std::bind(&ObstacleDetector::processObstacleDetection, this));
     
-    RCLCPP_INFO(this->get_logger(), "Obstacle detector initialized");
+    RCLCPP_INFO(this->get_logger(), "Obstacle detector initialized - waiting for map, pose, and scan data");
 }
 
+// =============== ROS2 Callback Functions ===============
+
+/**
+ * @brief Store latest LiDAR scan data and mark as received
+ * 
+ * This callback is triggered whenever new LiDAR data arrives. The scan data
+ * contains range measurements that will be processed in the main detection loop.
+ */
 void ObstacleDetector::laserScanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
 {
     latest_scan_ = msg;
     scan_received_ = true;
 }
 
+/**
+ * @brief Store latest robot pose/odometry data and mark as received
+ * 
+ * Robot pose is essential for transforming LiDAR points from sensor frame 
+ * to the global map frame for obstacle detection processing.
+ */
 void ObstacleDetector::poseCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
     latest_pose_ = msg;
     pose_received_ = true;
 }
 
+/**
+ * @brief Store static map data and mark as received
+ * 
+ * The static map is used to filter out points that correspond to known
+ * static obstacles, allowing detection of only dynamic obstacles.
+ */
 void ObstacleDetector::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
     static_map_ = msg;
@@ -100,11 +160,25 @@ void ObstacleDetector::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr
                 msg->info.width, msg->info.height, msg->info.resolution);
 }
 
+// =============== Main Obstacle Detection Processing ===============
+
+/**
+ * @brief Main processing loop for obstacle detection (called periodically by timer)
+ * 
+ * This function coordinates the complete obstacle detection pipeline:
+ * 1. Checks that all required data (map, pose, scan) is available
+ * 2. Converts LiDAR scan to 2D points in laser frame  
+ * 3. Transforms points to global coordinate frame
+ * 4. Filters out static map obstacles
+ * 5. Clusters remaining points using DBSCAN algorithm
+ * 6. Publishes detected obstacles and visualization data
+ */
 void ObstacleDetector::processObstacleDetection()
 {
+    // Wait for all required data to be available
     if (!map_received_ || !pose_received_ || !scan_received_) {
         static int debug_counter = 0;
-        if (debug_counter % 50 == 0) { // Print every 5 seconds at 10Hz
+        if (debug_counter % 50 == 0) { // Print status every 5 seconds at 10Hz
             RCLCPP_INFO(this->get_logger(), "Waiting for data - Map: %s, Pose: %s, Scan: %s", 
                         map_received_ ? "OK" : "MISSING",
                         pose_received_ ? "OK" : "MISSING", 
@@ -115,17 +189,17 @@ void ObstacleDetector::processObstacleDetection()
     }
     
     try {
-        // Convert laser scan to points
+        // Step 1: Convert LiDAR scan to 2D points in laser coordinate frame
         auto points = laserScanToPoints(latest_scan_);
         
-        // Transform points to global frame
+        // Step 2: Transform points from laser frame to global map frame
         auto global_points = transformPointsToGlobal(points);
         
-        // Filter out static map obstacles
+        // Step 3: Filter out points corresponding to static map obstacles
         auto obstacle_points = filterMapObstacles(global_points);
         
+        // Handle case where no dynamic obstacles are detected
         if (obstacle_points.empty()) {
-            // Publish empty obstacle array
             auto empty_msg = obstacle_detection_pkg::msg::ObstacleArray();
             empty_msg.header.stamp = this->now();
             empty_msg.header.frame_id = global_frame_id_;
@@ -134,13 +208,14 @@ void ObstacleDetector::processObstacleDetection()
             return;
         }
         
-        // Cluster obstacle points using DBSCAN
+        // Step 4: Cluster obstacle points using DBSCAN algorithm
         auto clusters = dbscanClustering(obstacle_points);
         
-        // Publish results
+        // Step 5: Create and publish obstacle detection results
         auto obstacle_msg = createObstacleMessage(clusters);
         obstacles_pub_->publish(obstacle_msg);
         
+        // Step 6: Publish optional outputs if enabled
         if (publish_updated_map_) {
             auto updated_map = updateOccupancyGrid(clusters);
             updated_map_pub_->publish(updated_map);
@@ -151,13 +226,21 @@ void ObstacleDetector::processObstacleDetection()
             visualization_pub_->publish(markers);
         }
         
-        RCLCPP_DEBUG(this->get_logger(), "Detected %zu obstacle clusters", clusters.size());
+        RCLCPP_DEBUG(this->get_logger(), "Successfully detected %zu obstacle clusters", clusters.size());
         
     } catch (const std::exception& e) {
-        RCLCPP_WARN(this->get_logger(), "Error in obstacle detection: %s", e.what());
+        RCLCPP_WARN(this->get_logger(), "Error in obstacle detection pipeline: %s", e.what());
     }
 }
 
+// =============== LiDAR Data Processing Functions ===============
+
+/**
+ * @brief Convert polar LiDAR scan data to Cartesian 2D points
+ * 
+ * Transforms range and angle measurements from LiDAR into 2D Cartesian coordinates
+ * in the laser sensor frame. Invalid measurements (NaN, inf, out of range) are filtered out.
+ */
 std::vector<pcl::PointXY> ObstacleDetector::laserScanToPoints(const sensor_msgs::msg::LaserScan::SharedPtr& scan)
 {
     std::vector<pcl::PointXY> points;

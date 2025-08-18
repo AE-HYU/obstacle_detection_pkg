@@ -1,44 +1,81 @@
+# ===============================================================================
+# Obstacle Detection Package Configuration File
+# ===============================================================================
+# 
+# This configuration file contains all parameters for the real-time obstacle
+# detection system using LiDAR data and DBSCAN clustering algorithm.
+# 
+# The system:
+# 1. Receives LiDAR scans and robot pose data
+# 2. Filters out static map obstacles
+# 3. Clusters remaining points using DBSCAN 
+# 4. Publishes detected dynamic obstacles
+# 
+# Author: Jisang Yun
+# License: MIT
+# ===============================================================================
+
 obstacle_detector:
   ros__parameters:
-    # ROS topic configuration
-    scan_topic: "/scan_noisy"                      # LaserScan input topic
-    odom_topic: "/ego_racecar/odom"          # Odometry/pose input topic
-    map_topic: "/obstacle_map"                # Static map topic from obstacle pkg
     
-    # Output topics
-    obstacles_topic: "/detected_obstacles"   # ObstacleArray output
-    updated_map_topic: "/updated_map"        # Updated occupancy grid
-    markers_topic: "/obstacle_markers"       # Visualization markers
+    # =============== ROS2 Topic Configuration ===============
+    # Input topics - data sources for obstacle detection
+    scan_topic: "/scan_noisy"                    # LaserScan input topic (LiDAR data)
+    odom_topic: "/ego_racecar/odom"              # Robot odometry/pose input topic
+    map_topic: "/obstacle_map"                   # Static environment map topic
     
-    # DBSCAN clustering parameters
-    dbscan_eps: 0.3              # Maximum distance between points in same cluster (meters)
-    dbscan_min_samples: 5        # Minimum points required to form cluster
+    # Output topics - obstacle detection results
+    obstacles_topic: "/detected_obstacles"       # ObstacleArray message with detected obstacles
+    updated_map_topic: "/updated_map"            # Updated occupancy grid with dynamic obstacles
+    markers_topic: "/obstacle_markers"           # Visualization markers for RViz display
     
-    # Obstacle detection thresholds
-    obstacle_threshold: 0.1      # Minimum distance from map obstacles to consider as new obstacle
-    map_inflation_radius: 0.2    # Inflation radius around map obstacles
+    # =============== DBSCAN Clustering Algorithm Parameters =============== 
+    # DBSCAN (Density-Based Spatial Clustering) groups nearby obstacle points
+    dbscan_eps: 0.3                              # Maximum distance between points in same cluster (meters)
+    dbscan_min_samples: 5                        # Minimum points required to form a valid cluster
     
-    # LiDAR processing
-    max_lidar_range: 10.0       # Maximum valid range for LiDAR points
-    min_lidar_range: 0.1        # Minimum valid range for LiDAR points
+    # =============== Obstacle Detection Parameters ===============
+    # Controls what points are considered obstacles vs static map features
+    obstacle_threshold: 0.1                      # Minimum distance from static obstacles (meters)
+    map_inflation_radius: 0.2                    # Safety margin around static map obstacles (meters)
     
-    # Map updates
-    update_rate: 10.0           # Hz - frequency of obstacle detection updates
+    # =============== LiDAR Data Processing Parameters ===============
+    # Range filtering to remove invalid measurements and limit detection range
+    max_lidar_range: 10.0                        # Maximum valid LiDAR range (meters)
+    min_lidar_range: 0.1                         # Minimum valid LiDAR range (meters)
     
-    # Publishing
-    publish_visualization: true  # Publish visualization markers
-    publish_updated_map: true    # Publish updated occupancy grid
+    # =============== Processing Control Parameters ===============
+    # Controls timing and frequency of obstacle detection processing
+    update_rate: 10.0                            # Processing frequency (Hz) - affects CPU usage
     
-    # Frame IDs
-    global_frame_id: "map"
-    robot_frame_id: "base_link"
+    # =============== Output Publishing Options ===============
+    # Enable/disable optional output publications to reduce computational load
+    publish_visualization: true                   # Enable RViz marker publishing for debugging
+    publish_updated_map: true                    # Enable updated occupancy grid publishing
+    
+    # =============== Coordinate Frame Configuration =============== 
+    # Define coordinate frames for proper spatial transformations
+    global_frame_id: "map"                       # Global coordinate frame (typically "map")
+    robot_frame_id: "base_link"                  # Robot base coordinate frame
+
+
+# ===============================================================================
+# Map Server Configuration (Legacy - kept for reference)
+# ===============================================================================
+# Note: Map server is now configured directly in launch file, but this section
+# is maintained for documentation and potential future use.
 
 map_server:
   ros__parameters:
-    # Map selection for obstacle detection
-    # Available options:
-    #   - levine: Multi-floor building map with complex geometry
-    #   - Spielberg_map: Race track configuration 
-    #   - basement_fixed: Basement environment
-    #   - map_1753950572: Custom SLAM-generated map from real data
-    map: 'Spielberg_map'           # Selected map file (without .yaml extension)
+    # =============== Available Map Options ===============
+    # Map selection for obstacle detection reference
+    # Available pre-configured maps in the maps/ directory:
+    #   - levine: Multi-floor building map with complex indoor geometry
+    #   - Spielberg_map: F1 race track configuration with curves and straights
+    #   - basement_fixed: Indoor basement environment with corridors  
+    #   - map_1753950572: Custom SLAM-generated map from real sensor data
+    
+    map: 'Spielberg_map'                         # Currently selected map (without .yaml extension)
+    
+    # Note: The actual map file path is configured in the launch file as:
+    # yaml_filename: <package_share>/maps/<map_name>.yaml
