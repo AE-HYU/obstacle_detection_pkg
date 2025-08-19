@@ -20,8 +20,8 @@ obstacle_detector:
     
     # =============== ROS2 Topic Configuration ===============
     # Input topics - data sources for obstacle detection
-    scan_topic: "/scan_noisy"                    # LaserScan input topic (LiDAR data)
-    odom_topic: "/ego_racecar/odom"              # Robot odometry/pose input topic
+    scan_topic: "/scan"                    # LaserScan input topic (LiDAR data)
+    odom_topic: "/pf/pose/odom"              # Robot odometry/pose input topic
     map_topic: "/obstacle_map"                   # Static environment map topic
     
     # Output topics - obstacle detection results
@@ -75,7 +75,8 @@ map_server:
     #   - basement_fixed: Indoor basement environment with corridors  
     #   - map_1753950572: Custom SLAM-generated map from real sensor data
     
-    map: 'Spielberg_map'                         # Currently selected map (without .yaml extension)
+    # map: 'Spielberg_map'                         # Currently selected map (without .yaml extension)
+    map: 'map_1753950572'                         # Currently selected map (without .yaml extension)
     
     # Note: The actual map file path is configured in the launch file as:
     # yaml_filename: <package_share>/maps/<map_name>.yaml

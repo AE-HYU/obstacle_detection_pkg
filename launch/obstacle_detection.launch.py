@@ -15,11 +15,13 @@ License: MIT
 """
 
 import os
+import yaml
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     """
@@ -31,6 +33,18 @@ def generate_launch_description():
     
     # =============== Package Configuration ===============
     pkg_share = FindPackageShare('obstacle_detection_pkg')
+    
+    # Read config file to auto-detect map name (runtime resolution)
+    # Try source directory first (development), then install directory
+    src_config_file = os.path.join(os.getcwd(), 'src', 'obstacle_detection_pkg', 'config', 'obstacle_detection_params.yaml')
+    config_file = src_config_file if os.path.exists(src_config_file) else os.path.join(
+        get_package_share_directory('obstacle_detection_pkg'),
+        'config',
+        'obstacle_detection_params.yaml'
+    )
+    # Extract default map name from config file
+    config_dict = yaml.safe_load(open(config_file, 'r'))
+    map_name = config_dict['map_server']['ros__parameters']['map']
     
     # =============== Launch Arguments ===============
     config_file_arg = DeclareLaunchArgument(
@@ -44,6 +58,15 @@ def generate_launch_description():
         pkg_share, 'config', LaunchConfiguration('config_file')
     ])
     
+    # Map file: resolve path dynamically
+    # Try source directory first (for development)
+    src_maps_path = os.path.join('src', 'obstacle_detection_pkg', 'maps', map_name + '.yaml')
+    if os.path.exists(src_maps_path):
+        map_file = os.path.abspath(src_maps_path)
+    else:
+        # Fallback to package share directory
+        map_file = os.path.join(get_package_share_directory('obstacle_detection_pkg'), 'maps', map_name + '.yaml')
+    
     # =============== ROS2 Nodes Configuration ===============
     
     # Map server node - provides static environment map for obstacle filtering
@@ -52,9 +75,7 @@ def generate_launch_description():
         executable='map_server',
         name='obstacle_map_server',  # Unique name to avoid conflicts with simulation map server
         parameters=[{
-            'yaml_filename': PathJoinSubstitution([
-                pkg_share, 'maps', 'Spielberg_map.yaml'  # Static map file for obstacle detection
-            ]),
+            'yaml_filename': map_file,  # Map file auto-resolved from config
             'use_sim_time': False,  # Use system time instead of simulation time
             'topic_name': '/obstacle_map'  # Publish map on unique topic to avoid conflicts
         }],
