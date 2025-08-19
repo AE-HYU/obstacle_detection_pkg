@@ -439,7 +439,7 @@ bool ObstacleDetector::isMapObstacle(double x, double y) const
                 my >= 0 && my < static_cast<int>(static_map_->info.height)) {
                 
                 int index = my * static_map_->info.width + mx;
-                if (static_map_->data[index] > 50) { // Occupied cell
+                if (static_map_->data[index] > 20) { // Occupied or uncertain cell (lower threshold for better filtering)
                     return true;
                 }
             }
