@@ -32,13 +32,13 @@ obstacle_detector:
     
     # =============== DBSCAN Clustering Algorithm Parameters =============== 
     # DBSCAN (Density-Based Spatial Clustering) groups nearby obstacle points
-    dbscan_eps: 0.2                              # Maximum distance between points in same cluster (meters)
-    dbscan_min_samples: 8                        # Minimum points required to form a valid cluster
+    dbscan_eps: 0.3                              # Maximum distance between points in same cluster (meters)
+    dbscan_min_samples: 5                        # Minimum points required to form a valid cluster
     
     # =============== Obstacle Detection Parameters ===============
     # Controls what points are considered obstacles vs static map features
     obstacle_threshold: 0.1                      # Minimum distance from static obstacles (meters)
-    map_inflation_radius: 0.5                    # Safety margin around static map obstacles (meters)
+    map_inflation_radius: 0.3                    # Safety margin around static map obstacles (meters)
     
     # =============== LiDAR Data Processing Parameters ===============
     # Range filtering to remove invalid measurements and limit detection range
