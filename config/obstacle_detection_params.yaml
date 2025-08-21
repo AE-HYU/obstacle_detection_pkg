@@ -79,7 +79,7 @@ map_server:
     # map: 'Spielberg_map'                         # Currently selected map (without .yaml extension)
     # map: 'map_1753950572'                         # Currently selected map (without .yaml extension)
     # map: 'first_map'                         # Currently selected map (without .yaml extension)
-    map: 'new_map1'
+    map: 'map_1753950572'
 
     # Note: The actual map file path is configured in the launch file as:
     # yaml_filename: <package_share>/maps/<map_name>.yaml
