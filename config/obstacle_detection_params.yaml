@@ -76,7 +76,7 @@ map_server:
     #   - basement_fixed: Indoor basement environment with corridors  
     #   - map_1753950572: Custom SLAM-generated map from real sensor data
     
-    map: 'Spielberg_map'                         # Currently selected map (without .yaml extension)
+    # map: 'Spielberg_map'                         # Currently selected map (without .yaml extension)
     # map: 'map_1753950572'                         # Currently selected map (without .yaml extension)
     # map: 'first_map'                         # Currently selected map (without .yaml extension)
     map: 'new_map1'
