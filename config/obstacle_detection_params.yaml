@@ -1,64 +1,62 @@
 # ===============================================================================
 # Obstacle Detection Package Configuration File
 # ===============================================================================
-# 
+#
 # This configuration file contains all parameters for the real-time obstacle
 # detection system using LiDAR data and DBSCAN clustering algorithm.
-# 
+#
 # The system:
 # 1. Receives LiDAR scans and robot pose data
 # 2. Filters out static map obstacles
-# 3. Clusters remaining points using DBSCAN 
+# 3. Clusters remaining points using DBSCAN
 # 4. Publishes detected dynamic obstacles
-# 
+#
 # Author: Jisang Yun
 # License: MIT
 # ===============================================================================
 
 obstacle_detector:
   ros__parameters:
-    
     # =============== ROS2 Topic Configuration ===============
     # Input topics - data sources for obstacle detection
-    scan_topic: "/scan"                    # LaserScan input topic (LiDAR data)
-    odom_topic: "/pf/pose/odom"              # Robot odometry/pose input topic
+    scan_topic: "/scan" # LaserScan input topic (LiDAR data)
+    odom_topic: "/pf/pose/odom" # Robot odometry/pose input topic
     # odom_topic: "/ego_racecar/odom"              # Robot odometry/pose input topic
-    map_topic: "/obstacle_map"                   # Static environment map topic
-    
+    map_topic: "/obstacle_map" # Static environment map topic
+
     # Output topics - obstacle detection results
-    obstacles_topic: "/detected_obstacles"       # ObstacleArray message with detected obstacles
-    updated_map_topic: "/updated_map"            # Updated occupancy grid with dynamic obstacles
-    markers_topic: "/obstacle_markers"           # Visualization markers for RViz display
-    
-    # =============== DBSCAN Clustering Algorithm Parameters =============== 
+    obstacles_topic: "/detected_obstacles" # ObstacleArray message with detected obstacles
+    updated_map_topic: "/updated_map" # Updated occupancy grid with dynamic obstacles
+    markers_topic: "/obstacle_markers" # Visualization markers for RViz display
+
+    # =============== DBSCAN Clustering Algorithm Parameters ===============
     # DBSCAN (Density-Based Spatial Clustering) groups nearby obstacle points
-    dbscan_eps: 0.3                              # Maximum distance between points in same cluster (meters)
-    dbscan_min_samples: 5                        # Minimum points required to form a valid cluster
-    
+    dbscan_eps: 0.3 # Maximum distance between points in same cluster (meters)
+    dbscan_min_samples: 5 # Minimum points required to form a valid cluster
+
     # =============== Obstacle Detection Parameters ===============
     # Controls what points are considered obstacles vs static map features
-    obstacle_threshold: 0.1                      # Minimum distance from static obstacles (meters)
-    map_inflation_radius: 0.3                    # Safety margin around static map obstacles (meters)
-    
+    obstacle_threshold: 0.1 # Minimum distance from static obstacles (meters)
+    map_inflation_radius: 0.3 # Safety margin around static map obstacles (meters)
+
     # =============== LiDAR Data Processing Parameters ===============
     # Range filtering to remove invalid measurements and limit detection range
-    max_lidar_range: 10.0                        # Maximum valid LiDAR range (meters)
-    min_lidar_range: 0.1                         # Minimum valid LiDAR range (meters)
-    
+    max_lidar_range: 10.0 # Maximum valid LiDAR range (meters)
+    min_lidar_range: 0.1 # Minimum valid LiDAR range (meters)
+
     # =============== Processing Control Parameters ===============
     # Controls timing and frequency of obstacle detection processing
-    update_rate: 10.0                            # Processing frequency (Hz) - affects CPU usage
-    
+    update_rate: 10.0 # Processing frequency (Hz) - affects CPU usage
+
     # =============== Output Publishing Options ===============
     # Enable/disable optional output publications to reduce computational load
-    publish_visualization: true                   # Enable RViz marker publishing for debugging
-    publish_updated_map: true                    # Enable updated occupancy grid publishing
-    
-    # =============== Coordinate Frame Configuration =============== 
-    # Define coordinate frames for proper spatial transformations
-    global_frame_id: "map"                       # Global coordinate frame (typically "map")
-    robot_frame_id: "base_link"                  # Robot base coordinate frame
+    publish_visualization: true # Enable RViz marker publishing for debugging
+    publish_updated_map: true # Enable updated occupancy grid publishing
 
+    # =============== Coordinate Frame Configuration ===============
+    # Define coordinate frames for proper spatial transformations
+    global_frame_id: "map" # Global coordinate frame (typically "map")
+    robot_frame_id: "base_link" # Robot base coordinate frame
 
 # ===============================================================================
 # Map Server Configuration (Legacy - kept for reference)
@@ -73,13 +71,13 @@ map_server:
     # Available pre-configured maps in the maps/ directory:
     #   - levine: Multi-floor building map with complex indoor geometry
     #   - Spielberg_map: F1 race track configuration with curves and straights
-    #   - basement_fixed: Indoor basement environment with corridors  
+    #   - basement_fixed: Indoor basement environment with corridors
     #   - map_1753950572: Custom SLAM-generated map from real sensor data
-    
+
     # map: 'Spielberg_map'                         # Currently selected map (without .yaml extension)
     # map: 'map_1753950572'                         # Currently selected map (without .yaml extension)
     # map: 'first_map'                         # Currently selected map (without .yaml extension)
-    map: 'map_1753950572'
+    map: "sibal1"
 
     # Note: The actual map file path is configured in the launch file as:
     # yaml_filename: <package_share>/maps/<map_name>.yaml
