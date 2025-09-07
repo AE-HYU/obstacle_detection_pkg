@@ -13,6 +13,19 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <algorithm>
+#include <cmath>
+
+// Helper function for angle normalization (replacing angles/angles.h dependency)
+namespace
+{
+    double shortest_angular_distance(double from, double to)
+    {
+        double diff = to - from;
+        while (diff > M_PI) diff -= 2.0 * M_PI;
+        while (diff < -M_PI) diff += 2.0 * M_PI;
+        return diff;
+    }
+}
 
 /**
  * @brief Constructor - Initialize obstacle detection node with parameters and ROS2 components
@@ -21,7 +34,7 @@
  * The node waits for map, pose, and scan data before beginning obstacle detection.
  */
 ObstacleDetector::ObstacleDetector() : Node("obstacle_detector"),
-    map_received_(false), pose_received_(false), scan_received_(false)
+    current_robot_velocity_(0.0), map_received_(false), pose_received_(false), scan_received_(false)
 {
     // =============== Parameter Declaration ===============
     // ROS2 topic configuration
@@ -49,6 +62,11 @@ ObstacleDetector::ObstacleDetector() : Node("obstacle_detector"),
     this->declare_parameter("publish_visualization", true);
     this->declare_parameter("publish_updated_map", true);
     
+    // High-speed filtering parameters
+    this->declare_parameter("velocity_adaptive_filtering", true);
+    this->declare_parameter("max_obstacle_persistence_frames", 3);
+    this->declare_parameter("min_obstacle_movement_threshold", 0.3);
+    
     // Frame ID parameters
     this->declare_parameter("global_frame_id", "map");
     this->declare_parameter("robot_frame_id", "base_link");
@@ -74,6 +92,11 @@ ObstacleDetector::ObstacleDetector() : Node("obstacle_detector"),
     // Publishing options
     publish_visualization_ = this->get_parameter("publish_visualization").as_bool();
     publish_updated_map_ = this->get_parameter("publish_updated_map").as_bool();
+    
+    // High-speed filtering options
+    velocity_adaptive_filtering_ = this->get_parameter("velocity_adaptive_filtering").as_bool();
+    max_obstacle_persistence_frames_ = this->get_parameter("max_obstacle_persistence_frames").as_int();
+    min_obstacle_movement_threshold_ = this->get_parameter("min_obstacle_movement_threshold").as_double();
     
     // Frame IDs
     global_frame_id_ = this->get_parameter("global_frame_id").as_string();
@@ -189,14 +212,25 @@ void ObstacleDetector::processObstacleDetection()
     }
     
     try {
+        // Step 0: Update robot velocity for adaptive filtering
+        updateRobotVelocity();
+        
         // Step 1: Convert LiDAR scan to 2D points in laser coordinate frame
         auto points = laserScanToPoints(latest_scan_);
         
         // Step 2: Transform points from laser frame to global map frame
         auto global_points = transformPointsToGlobal(points);
         
-        // Step 3: Filter out points corresponding to static map obstacles
+        // Step 3: Filter out points corresponding to static map obstacles with velocity compensation
         auto obstacle_points = filterMapObstacles(global_points);
+        
+        // Step 3.5: Apply temporal consistency filtering for additional robustness
+        obstacle_points = applyTemporalFiltering(obstacle_points);
+        
+        // Step 3.7: Apply velocity-adaptive filtering for high-speed motion
+        if (velocity_adaptive_filtering_) {
+            obstacle_points = applyVelocityAdaptiveFiltering(obstacle_points);
+        }
         
         // Handle case where no dynamic obstacles are detected
         if (obstacle_points.empty()) {
@@ -299,8 +333,15 @@ std::vector<pcl::PointXY> ObstacleDetector::filterMapObstacles(const std::vector
     std::vector<pcl::PointXY> filtered_points;
     
     for (const auto& point : points) {
-        if (isPointInMap(point.x, point.y) && !isMapObstacle(point.x, point.y)) {
-            filtered_points.push_back(point);
+        if (isPointInMap(point.x, point.y)) {
+            // Use velocity compensation if enabled, otherwise use standard filtering
+            bool is_static_obstacle = velocity_adaptive_filtering_ ? 
+                isMapObstacleWithVelocityCompensation(point.x, point.y) : 
+                isMapObstacle(point.x, point.y);
+                
+            if (!is_static_obstacle) {
+                filtered_points.push_back(point);
+            }
         }
     }
     
@@ -424,25 +465,102 @@ bool ObstacleDetector::isMapObstacle(double x, double y) const
         return false;
     }
     
-    // Check in inflated area around point
-    int inflation_cells = static_cast<int>(map_inflation_radius_ / static_map_->info.resolution);
+    // Enhanced multi-layer filtering for robust static obstacle detection
+    
+    // Layer 1: Direct cell check with conservative threshold
+    int mx = static_cast<int>((x - static_map_->info.origin.position.x) / static_map_->info.resolution);
+    int my = static_cast<int>((y - static_map_->info.origin.position.y) / static_map_->info.resolution);
+    
+    // Bounds check
+    if (mx < 0 || mx >= static_cast<int>(static_map_->info.width) || 
+        my < 0 || my >= static_cast<int>(static_map_->info.height)) {
+        return true; // Consider out-of-bounds as obstacle
+    }
+    
+    int center_index = my * static_map_->info.width + mx;
+    
+    // Very conservative threshold - even uncertain cells are treated as obstacles
+    if (static_map_->data[center_index] > 10) {
+        return true;
+    }
+    
+    // Layer 2: Inflated area check - examine larger radius for safety
+    double enhanced_inflation_radius = map_inflation_radius_ * 1.5; // 50% larger safety margin
+    int inflation_cells = static_cast<int>(enhanced_inflation_radius / static_map_->info.resolution);
+    
+    // Count occupied cells in inflation area
+    int occupied_count = 0;
+    int total_checked = 0;
     
     for (int dx = -inflation_cells; dx <= inflation_cells; ++dx) {
         for (int dy = -inflation_cells; dy <= inflation_cells; ++dy) {
-            double check_x = x + dx * static_map_->info.resolution;
-            double check_y = y + dy * static_map_->info.resolution;
+            // Skip center (already checked)
+            if (dx == 0 && dy == 0) continue;
             
-            int mx = static_cast<int>((check_x - static_map_->info.origin.position.x) / static_map_->info.resolution);
-            int my = static_cast<int>((check_y - static_map_->info.origin.position.y) / static_map_->info.resolution);
+            // Check if point is within circular inflation radius
+            double distance = sqrt(dx*dx + dy*dy) * static_map_->info.resolution;
+            if (distance > enhanced_inflation_radius) continue;
             
-            if (mx >= 0 && mx < static_cast<int>(static_map_->info.width) && 
-                my >= 0 && my < static_cast<int>(static_map_->info.height)) {
-                
-                int index = my * static_map_->info.width + mx;
-                if (static_map_->data[index] > 20) { // Occupied or uncertain cell (lower threshold for better filtering)
-                    return true;
-                }
+            int check_mx = mx + dx;
+            int check_my = my + dy;
+            
+            // Bounds check
+            if (check_mx < 0 || check_mx >= static_cast<int>(static_map_->info.width) || 
+                check_my < 0 || check_my >= static_cast<int>(static_map_->info.height)) {
+                occupied_count++; // Out-of-bounds considered as obstacle
+                total_checked++;
+                continue;
             }
+            
+            int check_index = check_my * static_map_->info.width + check_mx;
+            total_checked++;
+            
+            // More conservative threshold for surrounding area
+            if (static_map_->data[check_index] > 15) {
+                occupied_count++;
+            }
+        }
+    }
+    
+    // Layer 3: Density-based filtering
+    // If more than 20% of surrounding cells are occupied, consider as static obstacle
+    if (total_checked > 0) {
+        double obstacle_density = static_cast<double>(occupied_count) / total_checked;
+        if (obstacle_density > 0.2) {
+            return true;
+        }
+    }
+    
+    // Layer 4: Extended neighborhood check for map alignment issues
+    // Check a larger area to catch map misalignment cases
+    int extended_cells = static_cast<int>((map_inflation_radius_ * 2.0) / static_map_->info.resolution);
+    int extended_occupied = 0;
+    int extended_total = 0;
+    
+    for (int dx = -extended_cells; dx <= extended_cells; dx += 2) { // Skip every other cell for efficiency
+        for (int dy = -extended_cells; dy <= extended_cells; dy += 2) {
+            int ext_mx = mx + dx;
+            int ext_my = my + dy;
+            
+            if (ext_mx < 0 || ext_mx >= static_cast<int>(static_map_->info.width) || 
+                ext_my < 0 || ext_my >= static_cast<int>(static_map_->info.height)) {
+                continue;
+            }
+            
+            int ext_index = ext_my * static_map_->info.width + ext_mx;
+            extended_total++;
+            
+            if (static_map_->data[ext_index] > 25) {
+                extended_occupied++;
+            }
+        }
+    }
+    
+    // If extended area has high obstacle density, likely near static structure
+    if (extended_total > 0) {
+        double extended_density = static_cast<double>(extended_occupied) / extended_total;
+        if (extended_density > 0.15) {
+            return true;
         }
     }
     
@@ -573,4 +691,313 @@ visualization_msgs::msg::MarkerArray ObstacleDetector::createVisualizationMarker
     }
     
     return markers;
+}
+
+std::vector<pcl::PointXY> ObstacleDetector::applyTemporalFiltering(const std::vector<pcl::PointXY>& current_points)
+{
+    std::vector<pcl::PointXY> filtered_points;
+    
+    // Initialize on first run
+    if (previous_obstacle_points_.empty()) {
+        previous_obstacle_points_.push_back(current_points);
+        last_processing_time_ = this->now();
+        // Return all points on first frame (no history to compare against)
+        return current_points;
+    }
+    
+    // Time-based consistency check
+    rclcpp::Time current_time = this->now();
+    double time_delta = (current_time - last_processing_time_).seconds();
+    
+    // Skip temporal filtering if too much time has passed (robot might have moved significantly)
+    if (time_delta > 1.0) {
+        previous_obstacle_points_.clear();
+        previous_obstacle_points_.push_back(current_points);
+        last_processing_time_ = current_time;
+        return current_points;
+    }
+    
+    // Temporal consistency filtering
+    const double consistency_threshold = 0.8; // Points must be within 80cm to be considered "same location"
+    const int min_frame_presence = 2; // Point must appear in at least 2 frames to be considered dynamic
+    
+    for (const auto& current_point : current_points) {
+        int presence_count = 1; // Current frame counts as 1
+        
+        // Check presence in previous frames
+        for (const auto& prev_frame : previous_obstacle_points_) {
+            bool found_in_frame = false;
+            
+            for (const auto& prev_point : prev_frame) {
+                double distance = sqrt(pow(current_point.x - prev_point.x, 2) + 
+                                     pow(current_point.y - prev_point.y, 2));
+                
+                if (distance < consistency_threshold) {
+                    found_in_frame = true;
+                    break;
+                }
+            }
+            
+            if (found_in_frame) {
+                presence_count++;
+            }
+        }
+        
+        // Additional check: reject points that appear too consistently (likely static)
+        // If a point appears in ALL previous frames at the same location, it's probably static
+        if (presence_count >= min_frame_presence && presence_count < static_cast<int>(previous_obstacle_points_.size() + 1)) {
+            filtered_points.push_back(current_point);
+        } else if (previous_obstacle_points_.size() < 3) {
+            // In early frames, be more permissive
+            filtered_points.push_back(current_point);
+        }
+        // Points that appear in ALL frames are likely static misclassifications, so we filter them out
+    }
+    
+    // Update history (keep only last 5 frames for efficiency)
+    previous_obstacle_points_.push_back(current_points);
+    if (previous_obstacle_points_.size() > 5) {
+        previous_obstacle_points_.erase(previous_obstacle_points_.begin());
+    }
+    
+    last_processing_time_ = current_time;
+    
+    RCLCPP_DEBUG(this->get_logger(), 
+        "Temporal filtering: %zu -> %zu points (removed %zu potentially static points)",
+        current_points.size(), filtered_points.size(), 
+        current_points.size() - filtered_points.size());
+    
+    return filtered_points;
+}
+
+void ObstacleDetector::updateRobotVelocity()
+{
+    if (!latest_pose_) {
+        current_robot_velocity_ = 0.0;
+        return;
+    }
+    
+    // Update position history
+    geometry_msgs::msg::Point current_pos = latest_pose_->pose.pose.position;
+    previous_robot_positions_.push_back(current_pos);
+    
+    // Keep only last 5 positions for velocity calculation
+    if (previous_robot_positions_.size() > 5) {
+        previous_robot_positions_.erase(previous_robot_positions_.begin());
+    }
+    
+    // Calculate velocity from position history
+    if (previous_robot_positions_.size() >= 2) {
+        auto& prev_pos = previous_robot_positions_[previous_robot_positions_.size() - 2];
+        auto& curr_pos = previous_robot_positions_.back();
+        
+        double distance = sqrt(pow(curr_pos.x - prev_pos.x, 2) + pow(curr_pos.y - prev_pos.y, 2));
+        double time_delta = 1.0 / update_rate_; // Approximate time delta
+        current_robot_velocity_ = distance / time_delta;
+        
+        // Smooth velocity using moving average
+        static std::vector<double> velocity_history;
+        velocity_history.push_back(current_robot_velocity_);
+        if (velocity_history.size() > 3) {
+            velocity_history.erase(velocity_history.begin());
+        }
+        
+        double sum = 0.0;
+        for (double v : velocity_history) {
+            sum += v;
+        }
+        current_robot_velocity_ = sum / velocity_history.size();
+    }
+}
+
+bool ObstacleDetector::isMapObstacleWithVelocityCompensation(double x, double y) const
+{
+    if (!static_map_) {
+        return false;
+    }
+    
+    // Enhanced multi-layer filtering with velocity-based adaptations
+    
+    // Velocity-based margin scaling
+    double velocity_scale_factor = 1.0 + (current_robot_velocity_ * 0.5); // 50% increase per m/s
+    double adaptive_inflation_radius = map_inflation_radius_ * velocity_scale_factor;
+    
+    // Layer 1: Direct cell check with extra conservative threshold for high-speed
+    int mx = static_cast<int>((x - static_map_->info.origin.position.x) / static_map_->info.resolution);
+    int my = static_cast<int>((y - static_map_->info.origin.position.y) / static_map_->info.resolution);
+    
+    if (mx < 0 || mx >= static_cast<int>(static_map_->info.width) || 
+        my < 0 || my >= static_cast<int>(static_map_->info.height)) {
+        return true;
+    }
+    
+    int center_index = my * static_map_->info.width + mx;
+    
+    // Ultra-conservative threshold for high-speed scenarios
+    int occupancy_threshold = current_robot_velocity_ > 3.0 ? 5 : 10;
+    if (static_map_->data[center_index] > occupancy_threshold) {
+        return true;
+    }
+    
+    // Layer 2: Expanded inflation area with velocity compensation
+    int inflation_cells = static_cast<int>(adaptive_inflation_radius / static_map_->info.resolution);
+    int occupied_count = 0;
+    int total_checked = 0;
+    
+    // Check larger area for high-speed motion
+    for (int dx = -inflation_cells; dx <= inflation_cells; ++dx) {
+        for (int dy = -inflation_cells; dy <= inflation_cells; ++dy) {
+            if (dx == 0 && dy == 0) continue;
+            
+            double distance = sqrt(dx*dx + dy*dy) * static_map_->info.resolution;
+            if (distance > adaptive_inflation_radius) continue;
+            
+            int check_mx = mx + dx;
+            int check_my = my + dy;
+            
+            if (check_mx < 0 || check_mx >= static_cast<int>(static_map_->info.width) || 
+                check_my < 0 || check_my >= static_cast<int>(static_map_->info.height)) {
+                occupied_count++;
+                total_checked++;
+                continue;
+            }
+            
+            int check_index = check_my * static_map_->info.width + check_mx;
+            total_checked++;
+            
+            // More conservative threshold for high-speed
+            int area_threshold = current_robot_velocity_ > 3.0 ? 8 : 15;
+            if (static_map_->data[check_index] > area_threshold) {
+                occupied_count++;
+            }
+        }
+    }
+    
+    // Layer 3: Velocity-adaptive density check
+    if (total_checked > 0) {
+        double density_threshold = current_robot_velocity_ > 3.0 ? 0.1 : 0.2; // Stricter for high-speed
+        double obstacle_density = static_cast<double>(occupied_count) / total_checked;
+        if (obstacle_density > density_threshold) {
+            return true;
+        }
+    }
+    
+    // Layer 4: Extended area check with velocity compensation
+    int extended_cells = static_cast<int>((adaptive_inflation_radius * 1.5) / static_map_->info.resolution);
+    int extended_occupied = 0;
+    int extended_total = 0;
+    
+    for (int dx = -extended_cells; dx <= extended_cells; dx += 3) { // Larger steps for efficiency
+        for (int dy = -extended_cells; dy <= extended_cells; dy += 3) {
+            int ext_mx = mx + dx;
+            int ext_my = my + dy;
+            
+            if (ext_mx < 0 || ext_mx >= static_cast<int>(static_map_->info.width) || 
+                ext_my < 0 || ext_my >= static_cast<int>(static_map_->info.height)) {
+                continue;
+            }
+            
+            int ext_index = ext_my * static_map_->info.width + ext_mx;
+            extended_total++;
+            
+            if (static_map_->data[ext_index] > 25) {
+                extended_occupied++;
+            }
+        }
+    }
+    
+    if (extended_total > 0) {
+        double extended_threshold = current_robot_velocity_ > 3.0 ? 0.08 : 0.15;
+        double extended_density = static_cast<double>(extended_occupied) / extended_total;
+        if (extended_density > extended_threshold) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+std::vector<pcl::PointXY> ObstacleDetector::applyVelocityAdaptiveFiltering(const std::vector<pcl::PointXY>& points)
+{
+    std::vector<pcl::PointXY> filtered_points;
+    
+    if (!latest_pose_) {
+        return points; // No pose data, return as-is
+    }
+    
+    double robot_x = latest_pose_->pose.pose.position.x;
+    double robot_y = latest_pose_->pose.pose.position.y;
+    
+    // High-speed specific filtering
+    for (const auto& point : points) {
+        bool should_keep = true;
+        
+        // Filter 1: Distance-based filtering with velocity scaling
+        double distance_to_robot = sqrt(pow(point.x - robot_x, 2) + pow(point.y - robot_y, 2));
+        double min_distance_threshold = 0.5 + (current_robot_velocity_ * 0.2); // Increase with speed
+        
+        if (distance_to_robot < min_distance_threshold) {
+            should_keep = false; // Too close, likely sensor noise or ground reflection
+        }
+        
+        // Filter 2: Velocity-based direction filtering
+        if (current_robot_velocity_ > 2.0) { // Only for high-speed motion
+            // Calculate direction from robot to obstacle
+            double dx = point.x - robot_x;
+            double dy = point.y - robot_y;
+            
+            // Check if obstacle is in unexpected positions for high-speed motion
+            // (e.g., directly behind the robot - likely false positive from map misalignment)
+            double angle_to_obstacle = atan2(dy, dx);
+            
+            // Get robot heading from pose
+            tf2::Quaternion q;
+            tf2::fromMsg(latest_pose_->pose.pose.orientation, q);
+            double roll, pitch, robot_yaw;
+            tf2::Matrix3x3(q).getRPY(roll, pitch, robot_yaw);
+            
+            double relative_angle = shortest_angular_distance(robot_yaw, angle_to_obstacle);
+            
+            // Filter out obstacles directly behind robot during high-speed motion
+            if (std::abs(relative_angle) > 2.5 && distance_to_robot < 3.0) { // Behind robot and close
+                should_keep = false;
+            }
+        }
+        
+        // Filter 3: Persistence check for stationary "obstacles"
+        // Check if this obstacle has been stationary relative to the map for too many frames
+        if (should_keep && static_cast<int>(previous_obstacle_points_.size()) >= max_obstacle_persistence_frames_) {
+            int persistence_count = 0;
+            double persistence_threshold = min_obstacle_movement_threshold_;
+            
+            for (const auto& prev_frame : previous_obstacle_points_) {
+                bool found_stationary = false;
+                for (const auto& prev_point : prev_frame) {
+                    double movement = sqrt(pow(point.x - prev_point.x, 2) + pow(point.y - prev_point.y, 2));
+                    if (movement < persistence_threshold) {
+                        found_stationary = true;
+                        break;
+                    }
+                }
+                if (found_stationary) {
+                    persistence_count++;
+                }
+            }
+            
+            // If obstacle has been stationary in most previous frames, likely static misclassification
+            if (persistence_count >= max_obstacle_persistence_frames_ - 1) {
+                should_keep = false;
+            }
+        }
+        
+        if (should_keep) {
+            filtered_points.push_back(point);
+        }
+    }
+    
+    RCLCPP_DEBUG(this->get_logger(), 
+        "Velocity-adaptive filtering (v=%.2f m/s): %zu -> %zu points", 
+        current_robot_velocity_, points.size(), filtered_points.size());
+    
+    return filtered_points;
 }

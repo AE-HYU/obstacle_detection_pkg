@@ -36,8 +36,14 @@ obstacle_detector:
 
     # =============== Obstacle Detection Parameters ===============
     # Controls what points are considered obstacles vs static map features
-    obstacle_threshold: 0.1 # Minimum distance from static obstacles (meters)
-    map_inflation_radius: 0.3 # Safety margin around static map obstacles (meters)
+    obstacle_threshold: 0.02 # Minimum distance from static obstacles (meters) - very conservative for high-speed
+    map_inflation_radius: 0.8 # Safety margin around static map obstacles (meters) - large margin for sensor noise
+    
+    # =============== High-Speed Filtering Parameters ===============
+    # Additional parameters for robust filtering during high-speed motion
+    velocity_adaptive_filtering: true # Enable velocity-based adaptive filtering
+    max_obstacle_persistence_frames: 3 # Maximum frames an obstacle can persist in same location
+    min_obstacle_movement_threshold: 0.3 # Minimum movement (m) for obstacle to be considered dynamic
 
     # =============== LiDAR Data Processing Parameters ===============
     # Range filtering to remove invalid measurements and limit detection range

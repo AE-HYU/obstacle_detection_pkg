@@ -174,6 +174,33 @@ private:
      */
     bool isMapObstacle(double x, double y) const;
     
+    /**
+     * @brief Apply temporal consistency filtering to reduce false positives from static objects
+     * @param current_points Current frame obstacle points
+     * @return Filtered points that show temporal consistency (likely dynamic)
+     */
+    std::vector<pcl::PointXY> applyTemporalFiltering(const std::vector<pcl::PointXY>& current_points);
+    
+    /**
+     * @brief Apply velocity-adaptive filtering for high-speed motion scenarios
+     * @param points Points to filter based on robot velocity and motion
+     * @return Filtered points with velocity-based corrections
+     */
+    std::vector<pcl::PointXY> applyVelocityAdaptiveFiltering(const std::vector<pcl::PointXY>& points);
+    
+    /**
+     * @brief Update robot velocity tracking from odometry data
+     */
+    void updateRobotVelocity();
+    
+    /**
+     * @brief Enhanced map obstacle check with velocity compensation
+     * @param x World X coordinate
+     * @param y World Y coordinate  
+     * @return True if point is static map obstacle (with velocity-based margins)
+     */
+    bool isMapObstacleWithVelocityCompensation(double x, double y) const;
+    
     // =============== ROS2 Communication Components ===============
     
     // Subscribers
@@ -209,6 +236,19 @@ private:
     // Obstacle detection parameters
     double obstacle_threshold_;                                                    ///< Minimum distance from map obstacles (meters)
     double map_inflation_radius_;                                                  ///< Inflation radius around static map obstacles (meters)
+    
+    // Enhanced filtering parameters
+    std::vector<std::vector<pcl::PointXY>> previous_obstacle_points_;             ///< Previous frame obstacle points for temporal consistency
+    rclcpp::Time last_processing_time_;                                           ///< Timestamp of last processing for temporal filtering
+    
+    // High-speed motion filtering parameters
+    bool velocity_adaptive_filtering_;                                            ///< Enable velocity-based adaptive filtering
+    int max_obstacle_persistence_frames_;                                         ///< Maximum frames obstacle can persist in same location
+    double min_obstacle_movement_threshold_;                                      ///< Minimum movement threshold for dynamic obstacles
+    
+    // Robot state tracking for velocity-based filtering
+    double current_robot_velocity_;                                               ///< Current robot linear velocity
+    std::vector<geometry_msgs::msg::Point> previous_robot_positions_;             ///< Previous robot positions for velocity calculation
     
     // LiDAR processing parameters
     double max_lidar_range_;                                                       ///< Maximum valid LiDAR range (meters)
