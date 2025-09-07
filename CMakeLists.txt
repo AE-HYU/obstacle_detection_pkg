@@ -41,7 +41,7 @@ include_directories(
 add_definitions(${PCL_DEFINITIONS})
 
 # Add executable
-add_executable(obstacle_detector_node src/obstacle_detector_node.cpp src/obstacle_detector.cpp)
+add_executable(obstacle_detector_node src/obstacle_detector.cpp src/utils.cpp)
 
 # Dependencies for the executable
 ament_target_dependencies(obstacle_detector_node
